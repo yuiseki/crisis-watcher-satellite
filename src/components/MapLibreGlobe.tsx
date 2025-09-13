@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import maplibregl, { Map as MlMap, GeoJSONSource, MercatorCoordinate } from 'maplibre-gl'
+import maplibregl, { Map as MlMap, GeoJSONSource } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { FeatureCollection, Feature, Point } from 'geojson'
 import { twoline2satrec, propagate, eciToGeodetic, degreesLat, degreesLong, gstime } from 'satellite.js'
-import { createSatellitePointLayer } from '../lib/SatellitePointLayer'
+import { MapboxOverlay } from '@deck.gl/mapbox'
+import { ScatterplotLayer } from '@deck.gl/layers'
+import { COORDINATE_SYSTEM } from '@deck.gl/core'
 
 type Tle = { name?: string; l1: string; l2: string }
 
@@ -37,6 +39,29 @@ const STYLE_RASTER_GLOBE: any = {
   light: { anchor: 'map', position: [1.5, 90, 80] }
 }
 
+function pickColorByType(objectType: string, name: string, altKm: number) {
+  const t = objectType.toUpperCase()
+  // GNSS and nav constellations
+  const isNav = /(GPS|NAVSTAR|GLONASS|GALILEO|BEIDOU|BDS|IRNSS|QZSS)/i.test(name)
+  // Orbit regime heuristics
+  const isGEO = altKm > 30000
+  // Palette
+  const colors = {
+    payload: [1.00, 0.82, 0.40], // #ffd166
+    rocket: [0.97, 0.59, 0.12],  // #f8961e
+    debris: [0.62, 0.62, 0.62],  // #9e9e9e
+    nav: [0.18, 0.80, 0.44],     // #2ecc71
+    geo: [0.66, 0.55, 0.98],     // #a78bfa
+    other: [0.00, 0.83, 1.00]    // #00d4ff
+  }
+  if (isNav) return { r: colors.nav[0], g: colors.nav[1], b: colors.nav[2] }
+  if (isGEO) return { r: colors.geo[0], g: colors.geo[1], b: colors.geo[2] }
+  if (t.includes('PAYLOAD')) return { r: colors.payload[0], g: colors.payload[1], b: colors.payload[2] }
+  if (t.includes('ROCKET')) return { r: colors.rocket[0], g: colors.rocket[1], b: colors.rocket[2] }
+  if (t.includes('DEBRIS')) return { r: colors.debris[0], g: colors.debris[1], b: colors.debris[2] }
+  return { r: colors.other[0], g: colors.other[1], b: colors.other[2] }
+}
+
 const buildGeoJson = (
   coords: Array<{ lon: number; lat: number; hKm?: number; id: string; name?: string }>
 ): FeatureCollection => ({
@@ -49,22 +74,23 @@ const buildGeoJson = (
   })) as Feature[]
 })
 
-export const MapLibreGlobe: React.FC<{ tles: Tle[] }> = ({ tles }) => {
+export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<number, string> }> = ({ tles, typesBySatnum = {} }) => {
   const divRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<MlMap | null>(null)
   const [ready, setReady] = useState(false)
-  const satLayerRef = useRef<any | null>(null)
+  const overlayRef = useRef<MapboxOverlay | null>(null)
 
   const satrecs = useMemo(() => {
     return tles.slice(0, 200).map((t) => {
       try {
         const rec = twoline2satrec(t.l1, t.l2)
-        const id = t.name ?? (rec as any).satnum?.toString() ?? Math.random().toString(36).slice(2)
-        return { id, rec }
+        const satnum = (rec as any).satnum as number | undefined
+        const id = t.name ?? (satnum?.toString() ?? Math.random().toString(36).slice(2))
+        return { id, rec, satnum }
       } catch {
         return null
       }
-    }).filter(Boolean) as Array<{ id: string; rec: any }>
+    }).filter(Boolean) as Array<{ id: string; rec: any; satnum?: number }>
   }, [tles])
 
   useEffect(() => {
@@ -79,10 +105,10 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[] }> = ({ tles }) => {
     })
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
     map.on('load', () => {
-      // Add custom 3D point layer
-      const satLayer = createSatellitePointLayer('sats-3d')
-      map.addLayer(satLayer)
-      satLayerRef.current = satLayer
+      // deck.gl overlay interleaved with globe
+      const overlay = new MapboxOverlay({ interleaved: true, layers: [] })
+      map.addControl(overlay as any)
+      overlayRef.current = overlay
       setReady(true)
     })
     mapRef.current = map
@@ -170,15 +196,25 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[] }> = ({ tles }) => {
       const gj = buildGeoJson(coords)
       const src = map.getSource(srcId) as GeoJSONSource
       src.setData(gj)
-      // Update 3D space points via custom layer (altitude in meters)
-      const world = coords.map((c) => {
-        const altM = (c.hKm ?? 0) * 1000
-        const m = MercatorCoordinate.fromLngLat([c.lon, c.lat], altM)
-        return { x: m.x, y: m.y, z: m.z }
+      // Build deck.gl scatter layer: position [lon,lat,alt(m)]
+      const scatter = new ScatterplotLayer({
+        id: 'sats-scatter',
+        data: coords.map((c, idx) => {
+          const sr = satrecs[idx]
+          const typ = (sr?.satnum && typesBySatnum[sr.satnum]) || ''
+          const name = c.name || ''
+          const { r, g, b } = pickColorByType(typ, name, c.hKm ?? 0)
+          return { position: [c.lon, c.lat, Math.max(0, (c.hKm ?? 0) * 1000)], color: [Math.round(r*255), Math.round(g*255), Math.round(b*255), 255] }
+        }),
+        coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+        getPosition: (d: any) => d.position,
+        getFillColor: (d: any) => d.color,
+        radiusUnits: 'meters',
+        getRadius: 60000,
+        parameters: { depthTest: true },
+        pickable: false
       })
-      if (satLayerRef.current && satLayerRef.current.setPositions) {
-        satLayerRef.current.setPositions(world)
-      }
+      overlayRef.current?.setProps({ layers: [scatter] })
     }
     tick()
     const t = setInterval(tick, 1000)

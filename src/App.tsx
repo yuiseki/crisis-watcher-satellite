@@ -84,13 +84,17 @@ export default function App() {
 
 const LoadTleAndRender: React.FC = () => {
   const [tles, setTles] = useState<Array<{ name?: string; l1: string; l2: string }> | null>(null)
+  const [typesBySatnum, setTypesBySatnum] = useState<Record<number, string>>({})
   const [err, setErr] = useState<string | null>(null)
   useEffect(() => {
     ;(async () => {
       try {
-        const res = await fetch('data/latest/gp_active.tle')
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const text = await res.text()
+        const [tleRes, gpRes] = await Promise.all([
+          fetch('data/latest/gp_active.tle'),
+          fetch('data/latest/gp_active.json')
+        ])
+        if (!tleRes.ok) throw new Error(`HTTP ${tleRes.status}`)
+        const text = await tleRes.text()
         const lines = text.split(/\r?\n/)
         const out: Array<{ name?: string; l1: string; l2: string }> = []
         for (let i = 0; i < lines.length; i++) {
@@ -102,6 +106,16 @@ const LoadTleAndRender: React.FC = () => {
           }
         }
         setTles(out)
+        if (gpRes.ok) {
+          const gp = await gpRes.json()
+          const map: Record<number, string> = {}
+          for (const o of gp as any[]) {
+            const satnum = Number(o.NORAD_CAT_ID)
+            const typ = String(o.OBJECT_TYPE || '')
+            if (!Number.isNaN(satnum)) map[satnum] = typ
+          }
+          setTypesBySatnum(map)
+        }
       } catch (e: any) {
         setErr(e?.message ?? String(e))
       }
@@ -109,5 +123,5 @@ const LoadTleAndRender: React.FC = () => {
   }, [])
   if (err) return <div>Error loading TLE: {err}</div>
   if (!tles) return <div>Loading TLE…</div>
-  return <MapLibreGlobe tles={tles} />
+  return <MapLibreGlobe tles={tles} typesBySatnum={typesBySatnum} />
 }
