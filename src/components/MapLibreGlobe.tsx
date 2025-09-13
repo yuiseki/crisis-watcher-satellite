@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import maplibregl, { Map as MlMap } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { MapboxOverlay } from '@deck.gl/mapbox'
-import { ScatterplotLayer } from '@deck.gl/layers'
+import { ScatterplotLayer, PathLayer } from '@deck.gl/layers'
 import { COORDINATE_SYSTEM } from '@deck.gl/core'
 import { twoline2satrec, propagate, eciToGeodetic, degreesLat, degreesLong, gstime } from 'satellite.js'
 
@@ -63,6 +63,7 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
   useEffect(() => {
     if (!ready || !overlayRef.current) return
     let alive = true
+    let pathTick = 0
     const tick = () => {
       const now = new Date()
       const gmst = gstime(now)
@@ -80,7 +81,7 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
       }).filter(Boolean) as Array<{ position: [number, number, number]; color: [number, number, number, number] }>
 
       const fallback = [{ position: [0, 0, 160_000], color: [255, 0, 0, 255] as [number, number, number, number] }]
-      const layer = new ScatterplotLayer({
+      const layerPoints = new ScatterplotLayer({
         id: 'sats-3d',
         data: data.length ? data : fallback,
         coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
@@ -91,7 +92,43 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
         parameters: { depthTest: true, depthMask: true },
         pickable: false
       })
-      overlayRef.current?.setProps({ layers: [layer] })
+
+      // Simple orbit preview for first 3 satellites (next 90 min, 60s step)
+      const layers: any[] = [layerPoints]
+      if (data.length >= 1) {
+        if (pathTick % 10 === 0) {
+          const paths = satrecs.slice(0, 3).map((s) => {
+            const pts: [number, number, number][] = []
+            for (let t = 0; t <= 90 * 60; t += 60) {
+              const dt = new Date(now.getTime() + t * 1000)
+              const gmstT = gstime(dt)
+              const pvT = propagate(s.rec, dt)
+              const posT = pvT?.position
+              if (!posT) continue
+              const gdT = eciToGeodetic(posT, gmstT)
+              const latT = degreesLat(gdT.latitude)
+              const lonT = degreesLong(gdT.longitude)
+              const altMT = Math.max(0, (gdT.height ?? 0) * 1000)
+              pts.push([lonT, latT, altMT])
+            }
+            return { path: pts }
+          })
+          const layerPath = new PathLayer({
+            id: 'sats-path',
+            data: paths,
+            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+            getPath: (d: any) => d.path,
+            widthUnits: 'meters',
+            getWidth: 20000,
+            getColor: [255, 255, 255, 80],
+            parameters: { depthTest: true, depthMask: false },
+            wrapLongitude: true
+          })
+          layers.push(layerPath)
+        }
+        pathTick++
+      }
+      overlayRef.current?.setProps({ layers })
     }
     tick()
     const t = setInterval(() => alive && tick(), 1000)
@@ -100,4 +137,3 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
 
   return <div ref={divRef} style={{ height: '75vh', borderRadius: 8, overflow: 'hidden' }} />
 }
-
