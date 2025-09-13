@@ -48,9 +48,9 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[] }> = ({ tles }) => {
     // Ensure globe projection after style is ready
     const applyGlobe = () => {
       try {
-        // MapLibre 5+: set projection and optional atmosphere (fog)
-        // @ts-expect-error types may lag behind
-        map.setProjection({ name: 'globe' })
+        // MapLibre 5+: set projection name as string
+        // @ts-expect-error types may lag behind in some setups
+        map.setProjection('globe')
         // @ts-expect-error fog API exists in MapLibre 5+
         map.setFog({})
       } catch (e) {
