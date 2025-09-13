@@ -43,10 +43,25 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[] }> = ({ tles }) => {
       zoom: 1.2,
       pitch: 0,
       bearing: 0,
-      projection: 'globe' as any,
     })
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
+    // Ensure globe projection after style is ready
+    const applyGlobe = () => {
+      try {
+        // MapLibre 5+: set projection and optional atmosphere (fog)
+        // @ts-expect-error types may lag behind
+        map.setProjection({ name: 'globe' })
+        // @ts-expect-error fog API exists in MapLibre 5+
+        map.setFog({})
+      } catch (e) {
+        // ignore if not supported
+      }
+    }
+    map.on('style.load', () => {
+      applyGlobe()
+    })
     map.on('load', () => {
+      applyGlobe()
       setReady(true)
     })
     mapRef.current = map
