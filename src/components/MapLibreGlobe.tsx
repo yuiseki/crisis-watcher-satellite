@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import maplibregl, { Map as MlMap } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { MapboxOverlay } from '@deck.gl/mapbox'
-import { ScatterplotLayer, PathLayer } from '@deck.gl/layers'
+import { PathLayer, ScatterplotLayer, IconLayer } from '@deck.gl/layers'
 import { COORDINATE_SYSTEM } from '@deck.gl/core'
 import { twoline2satrec, propagate, eciToGeodetic, degreesLat, degreesLong, gstime } from 'satellite.js'
+// Globe-compatible sphere impostors via IconLayer
 
 type Tle = { name?: string; l1: string; l2: string }
 
@@ -19,12 +20,13 @@ function pickColorByType(objectType: string, name: string, altKm: number): [numb
   const t = (objectType || '').toUpperCase()
   const isNav = /(GPS|NAVSTAR|GLONASS|GALILEO|BEIDOU|BDS|IRNSS|QZSS)/i.test(name)
   const isGEO = altKm > 30000
-  if (isNav) return [46, 204, 113, 255]
-  if (isGEO) return [167, 139, 250, 255]
-  if (t.includes('PAYLOAD')) return [255, 209, 102, 255]
-  if (t.includes('ROCKET')) return [248, 150, 30, 255]
-  if (t.includes('DEBRIS')) return [158, 158, 158, 255]
-  return [0, 212, 255, 255]
+  // Warm palette (yellow/orange/red)
+  if (isNav) return [255, 196, 61, 255]      // golden yellow
+  if (isGEO) return [255, 174, 66, 255]      // warm amber
+  if (t.includes('PAYLOAD')) return [255, 209, 102, 255] // soft yellow
+  if (t.includes('ROCKET')) return [255, 99, 44, 255]    // orange-red
+  if (t.includes('DEBRIS')) return [214, 69, 65, 255]    // deep red
+  return [255, 151, 51, 255]                 // orange
 }
 
 export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<number, string> }> = ({ tles, typesBySatnum = {} }) => {
@@ -32,6 +34,7 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
   const mapRef = useRef<MlMap | null>(null)
   const overlayRef = useRef<MapboxOverlay | null>(null)
   const [ready, setReady] = useState(false)
+  const [iconAtlasUrl, setIconAtlasUrl] = useState<string | null>(null)
 
   const satrecs = useMemo(() => {
     return tles.slice(0, 300).map((t) => {
@@ -54,6 +57,40 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
       const overlay = new MapboxOverlay({ interleaved: true, layers: [] }) as any
       map.addControl(overlay)
       overlayRef.current = overlay
+      try { overlayRef.current?.setProps({ clearCanvas: false }) } catch {}
+      // Build a small shaded icon atlas (grayscale lit sphere)
+      try {
+        const size = 128
+        const canvas = document.createElement('canvas')
+        canvas.width = size
+        canvas.height = size
+        const ctx = canvas.getContext('2d')!
+        ctx.clearRect(0, 0, size, size)
+        const cx = size / 2, cy = size / 2, r = size * 0.48
+        const len = Math.sqrt(0.6*0.6 + 0.4*0.4 + 1.0*1.0)
+        const lx = 0.6/len, ly = 0.4/len, lz = 1.0/len
+        for (let y = 0; y < size; y++) {
+          for (let x = 0; x < size; x++) {
+            const dx = (x + 0.5 - cx) / r
+            const dy = (y + 0.5 - cy) / r
+            const rr = dx * dx + dy * dy
+            if (rr > 1) continue
+            const z = Math.sqrt(1 - rr)
+            const ndotl = Math.max(0, dx * lx + dy * ly + z * lz)
+            const ambient = 0.25
+            const shade = ambient + (1 - ambient) * ndotl
+            const v = Math.floor(255 * shade)
+            ctx.fillStyle = `rgb(${v},${v},${v})`
+            ctx.fillRect(x, y, 1, 1)
+          }
+        }
+        const url = canvas.toDataURL()
+        setIconAtlasUrl(url)
+        try {
+          // eslint-disable-next-line no-console
+          console.debug('[MapLibreGlobe] icon atlas ready length=', url.length)
+        } catch {}
+      } catch {}
       setReady(true)
     })
     mapRef.current = map
@@ -64,6 +101,16 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
     if (!ready || !overlayRef.current) return
     let alive = true
     let pathTick = 0
+    // Logarithmic altitude scaling to “stick” satellites to just outside the atmosphere
+    const ATMOSPHERE_TOP_M = 200_000 // raise minimum altitude slightly (~200 km)
+    const SHELL_THICKNESS_M = 80_000 // visual shell thickness outside atmosphere
+    const MAX_ALT_M = 100_000_000 // normalize up to ~100,000 km
+    const scaleAltitudeLog = (altM: number) => {
+      const a = Math.max(0, Math.min(altM, MAX_ALT_M))
+      const t = Math.log1p(a) / Math.log1p(MAX_ALT_M)
+      return ATMOSPHERE_TOP_M + t * SHELL_THICKNESS_M
+    }
+    // IconLayer expects 0-255 RGBA; keep as-is
     const tick = () => {
       const now = new Date()
       const gmst = gstime(now)
@@ -75,26 +122,61 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
         const lat = degreesLat(gd.latitude)
         const lon = degreesLong(gd.longitude)
         const altM = Math.max(0, (gd.height ?? 0) * 1000)
+        const altScaledM = scaleAltitudeLog(altM)
         const typ = (s.satnum && typesBySatnum[s.satnum]) || ''
         const color = pickColorByType(typ, s.id, gd.height ?? 0)
-        return { position: [lon, lat, altM], color }
+        return { position: [lon, lat, altScaledM], color }
       }).filter(Boolean) as Array<{ position: [number, number, number]; color: [number, number, number, number] }>
 
-      const fallback = [{ position: [0, 0, 160_000], color: [255, 0, 0, 255] as [number, number, number, number] }]
-      const layerPoints = new ScatterplotLayer({
-        id: 'sats-3d',
-        data: data.length ? data : fallback,
+  // Debug: count + sample (kept lightweight)
+  try {
+    if ((data.length ?? 0) % 60 === 0) {
+      // eslint-disable-next-line no-console
+      console.debug(`[MapLibreGlobe] sats=`, data.length, `sample=`, data[0]?.position)
+    }
+  } catch {}
+
+      // Globe-friendly sphere impostor via IconLayer (billboard with shaded atlas)
+      const iconMapping = {
+        sphere: { x: 0, y: 0, width: 128, height: 128, mask: false, anchorX: 64, anchorY: 64 }
+      } as any
+      const sphereImpostors = iconAtlasUrl ? new IconLayer({
+        id: 'sats-sphere-impostor',
+        data,
+        coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+        getPosition: (d: any) => d.position,
+        getIcon: () => 'sphere',
+        iconMapping,
+        iconAtlas: iconAtlasUrl,
+        sizeUnits: 'pixels',
+        getSize: 24,
+        sizeMinPixels: 12,
+        sizeMaxPixels: 40,
+        getColor: (d: any) => d.color,
+        parameters: { depthTest: false, depthMask: false }
+      }) : null
+
+      // Simple orbit preview for first 3 satellites (next 90 min, 60s step)
+      // Fallback points (deck.glのみ) — アイコン未準備時のみ使用
+      const fallbackPoints = new ScatterplotLayer({
+        id: 'sats-fallback',
+        data,
         coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
         getPosition: (d: any) => d.position,
         getFillColor: (d: any) => d.color,
         radiusUnits: 'meters',
-        getRadius: 60000,
-        parameters: { depthTest: true, depthMask: true },
+        getRadius: 90000,
+        radiusMinPixels: 2,
+        radiusMaxPixels: 20,
+        parameters: { depthTest: false, depthMask: false },
         pickable: false
       })
 
-      // Simple orbit preview for first 3 satellites (next 90 min, 60s step)
-      const layers: any[] = [layerPoints]
+      const layers: any[] = []
+      // まず円を入れて確実に見せる
+      layers.push(fallbackPoints)
+      // アイコンが準備できたら必ず最後に入れて前面へ
+      if (sphereImpostors) layers.push(sphereImpostors)
       if (data.length >= 1) {
         if (pathTick % 10 === 0) {
           const paths = satrecs.slice(0, 3).map((s) => {
@@ -109,7 +191,8 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
               const latT = degreesLat(gdT.latitude)
               const lonT = degreesLong(gdT.longitude)
               const altMT = Math.max(0, (gdT.height ?? 0) * 1000)
-              pts.push([lonT, latT, altMT])
+              const altScaledMT = scaleAltitudeLog(altMT)
+              pts.push([lonT, latT, altScaledMT])
             }
             return { path: pts }
           })
@@ -120,7 +203,7 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
             getPath: (d: any) => d.path,
             widthUnits: 'meters',
             getWidth: 20000,
-            getColor: [255, 255, 255, 80],
+            getColor: [255, 200, 120, 120],
             parameters: { depthTest: true, depthMask: false },
             wrapLongitude: true
           })
@@ -128,12 +211,12 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
         }
         pathTick++
       }
-      overlayRef.current?.setProps({ layers })
+      overlayRef.current?.setProps({ layers, clearCanvas: false })
     }
     tick()
     const t = setInterval(() => alive && tick(), 1000)
     return () => { alive = false; clearInterval(t) }
-  }, [ready, satrecs, typesBySatnum])
+  }, [ready, satrecs, typesBySatnum, iconAtlasUrl])
 
   return <div ref={divRef} style={{ height: '75vh', borderRadius: 8, overflow: 'hidden' }} />
 }

@@ -9,6 +9,7 @@ export type SatPoint = { x: number; y: number; z: number; r?: number; g?: number
 
 export function createSatellitePointLayer(id = 'satellite-points-3d') {
   let gl: GL | null = null
+  let map: MlMap | null = null
   let program: WebGLProgram | null = null
   let buffer: WebGLBuffer | null = null
   let colorBuffer: WebGLBuffer | null = null
@@ -39,13 +40,18 @@ export function createSatellitePointLayer(id = 'satellite-points-3d') {
     uniform vec3 u_color;
     varying vec3 v_col;
     void main(){
-      vec2 c = gl_PointCoord - vec2(0.5);
-      if(dot(c,c) > 0.25) discard; // round point
-      vec3 col = v_col;
-      if (col.r + col.g + col.b <= 0.0) {
-        col = u_color;
-      }
-      gl_FragColor = vec4(col, 1.0);
+      // Sphere impostor shading for a lit look
+      vec2 uv = gl_PointCoord * 2.0 - 1.0; // [-1,1]
+      float r2 = dot(uv, uv);
+      if (r2 > 1.0) discard; // circle cutout
+      float z = sqrt(1.0 - r2);
+      vec3 normal = normalize(vec3(uv, z));
+      vec3 lightDir = normalize(vec3(0.6, 0.4, 1.0));
+      float diff = max(dot(normal, lightDir), 0.0);
+      float ambient = 0.25;
+      vec3 base = v_col.r + v_col.g + v_col.b > 0.0 ? v_col : u_color;
+      vec3 shaded = base * (ambient + (1.0 - ambient) * diff);
+      gl_FragColor = vec4(shaded, 1.0);
     }
   `
 
@@ -78,7 +84,8 @@ export function createSatellitePointLayer(id = 'satellite-points-3d') {
     id,
     type: 'custom',
     renderingMode: '3d',
-    onAdd(map: MlMap, glIn: GL) {
+    onAdd(mapIn: MlMap, glIn: GL) {
+      map = mapIn
       gl = glIn
       program = createProgram(gl, vert, frag)
       aPosLoc = gl.getAttribLocation(program!, 'a_pos')
@@ -92,14 +99,15 @@ export function createSatellitePointLayer(id = 'satellite-points-3d') {
       colorBuffer = gl.createBuffer()
       gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer)
       gl.bufferData(gl.ARRAY_BUFFER, colors, gl.DYNAMIC_DRAW)
+      // eslint-disable-next-line no-console
+      console.debug('[SatellitePointLayer] onAdd: shader/attribs ready', { aPosLoc, aColLoc, hasMatrix: !!uMatrixLoc })
     },
-    render(glIn: GL, matrix: number[]) {
+    render(glIn: GL, matrix: number[] | Float32Array) {
       if (!gl || !program || !buffer) return
       gl.useProgram(program)
 
-      gl.enable(gl.DEPTH_TEST)
-      gl.depthFunc(gl.LEQUAL)
-      // points opaque to avoid washed-out look
+      // Render on top of the globe for visibility while debugging
+      gl.disable(gl.DEPTH_TEST)
       gl.disable(gl.BLEND)
 
       if (needsUpload) {
@@ -120,11 +128,17 @@ export function createSatellitePointLayer(id = 'satellite-points-3d') {
         gl.enableVertexAttribArray(aColLoc)
         gl.vertexAttribPointer(aColLoc, 3, gl.FLOAT, false, 12, 0)
       }
-      // Ensure Float32Array for WebGL uniform
-      gl.uniformMatrix4fv(uMatrixLoc, false, new Float32Array(matrix))
-      gl.uniform1f(uPointSizeLoc, 4.0)
-      gl.uniform3f(uColorLoc, 1.0, 0.35, 0.35)
+      // Ensure Float32Array(16) for WebGL uniform
+      const mat = new Float32Array(16)
+      // Some environments pass a plain array; copy defensively
+      for (let k = 0; k < 16; k++) mat[k] = (matrix as any)[k] ?? 0
+      if (uMatrixLoc) gl.uniformMatrix4fv(uMatrixLoc, false, mat)
+      if (uPointSizeLoc) gl.uniform1f(uPointSizeLoc, 20.0)
+      // default warm color (amber)
+      if (uColorLoc) gl.uniform3f(uColorLoc, 1.0, 0.7, 0.2)
       const count = positions.length / 3
+      // eslint-disable-next-line no-console
+      console.debug(`[SatellitePointLayer] render draw count=`, count)
       if (count > 0) gl.drawArrays(gl.POINTS, 0, count)
     },
     prerender() {},
@@ -136,6 +150,7 @@ export function createSatellitePointLayer(id = 'satellite-points-3d') {
       colorBuffer = null
       program = null
       gl = null
+      map = null
     },
     setPositions(worldPositions: SatPoint[]) {
       positions = new Float32Array(worldPositions.length * 3)
@@ -150,7 +165,11 @@ export function createSatellitePointLayer(id = 'satellite-points-3d') {
         colors[j++] = p.g ?? 0
         colors[j++] = p.b ?? 0
       }
+      // eslint-disable-next-line no-console
+      console.debug(`[SatellitePointLayer] setPositions n=`, worldPositions.length)
       needsUpload = true
+      // Ensure the map requests a new frame to render updated buffers
+      try { map?.triggerRepaint() } catch {}
     }
   }
 
