@@ -1,65 +1,76 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react'
 
-type IndexMeta = {
-  generatedAt: string;
-  timeZone: string;
-  hourPath: string;
-  counts: { gpActive: number; satcatOnOrbitPayloads: number; supgpSpacex: number };
-  files: { gpActive: string; satcatOnOrbitPayloads: string; supgpSpacex: string };
-};
-
-export default function App() {
-  const [meta, setMeta] = useState<IndexMeta | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const url = `${import.meta.env.BASE_URL}public/data/latest/index.json`;
-    fetch(url)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(setMeta)
-      .catch((e) => setError(String(e)));
-  }, []);
-
-  return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: 16 }}>
-      <h1>crisis-watcher-satellite</h1>
-      <p>最新スナップショットの概要を表示します。</p>
-      {error && <p style={{ color: 'crimson' }}>Error: {error}</p>}
-      {!meta && !error && <p>Loading...</p>}
-      {meta && (
-        <section>
-          <p>
-            generatedAt: <code>{meta.generatedAt}</code> / hourPath: <code>{meta.hourPath}</code>
-          </p>
-          <ul>
-            <li>gp_active count: <strong>{meta.counts.gpActive}</strong></li>
-            <li>satcat_onorbit_payloads lines: <strong>{meta.counts.satcatOnOrbitPayloads}</strong></li>
-            <li>supgp_spacex count: <strong>{meta.counts.supgpSpacex}</strong></li>
-          </ul>
-          <p>Files (latest):</p>
-          <ul>
-            <li>
-              <a href={`${import.meta.env.BASE_URL}public/data/latest/${meta.files.gpActive}`} target="_blank" rel="noreferrer">
-                {meta.files.gpActive}
-              </a>
-            </li>
-            <li>
-              <a href={`${import.meta.env.BASE_URL}public/data/latest/${meta.files.satcatOnOrbitPayloads}`} target="_blank" rel="noreferrer">
-                {meta.files.satcatOnOrbitPayloads}
-              </a>
-            </li>
-            <li>
-              <a href={`${import.meta.env.BASE_URL}public/data/latest/${meta.files.supgpSpacex}`} target="_blank" rel="noreferrer">
-                {meta.files.supgpSpacex}
-              </a>
-            </li>
-          </ul>
-        </section>
-      )}
-    </main>
-  );
+type SatIndex = {
+  generatedAt: string
+  timeZone: string
+  hourPath: string
+  counts: { gpActive: number; satcatOnOrbitPayloads: number; supgpSpacex: number }
+  files: { gpActive: string; satcatOnOrbitPayloads: string; supgpSpacex: string }
 }
 
+export default function App() {
+  const [data, setData] = useState<SatIndex | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  // Follow sibling repos: fetch relative to site root (public/ is auto-served)
+  const url = `data/latest/index.json`
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        setLoading(true)
+        const res = await fetch(url)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const json = (await res.json()) as SatIndex
+        if (!alive) return
+        setData(json)
+      } catch (e: any) {
+        if (!alive) return
+        setError(e?.message ?? String(e))
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [url])
+
+  if (loading) return <div>Loading…</div>
+  if (error) return <div>Error: {error}</div>
+  if (!data) return <div>No data</div>
+
+  return (
+    <div style={{ fontFamily: 'system-ui, sans-serif', padding: 16 }}>
+      <h1>人工衛星 軌道要素スナップショット（最新）</h1>
+      <p>
+        生成: <code>{data.generatedAt}</code> / 時間帯: <code>{data.hourPath}</code>
+      </p>
+      <ul>
+        <li>gp_active 件数: <b>{data.counts.gpActive}</b></li>
+        <li>satcat_onorbit_payloads 行数: <b>{data.counts.satcatOnOrbitPayloads}</b></li>
+        <li>supgp_spacex 件数: <b>{data.counts.supgpSpacex}</b></li>
+      </ul>
+      <p>最新ファイル:</p>
+      <ul>
+        <li>
+          <a href={`data/latest/${data.files.gpActive}`} target="_blank" rel="noreferrer">
+            {data.files.gpActive}
+          </a>
+        </li>
+        <li>
+          <a href={`data/latest/${data.files.satcatOnOrbitPayloads}`} target="_blank" rel="noreferrer">
+            {data.files.satcatOnOrbitPayloads}
+          </a>
+        </li>
+        <li>
+          <a href={`data/latest/${data.files.supgpSpacex}`} target="_blank" rel="noreferrer">
+            {data.files.supgpSpacex}
+          </a>
+        </li>
+      </ul>
+    </div>
+  )
+}
