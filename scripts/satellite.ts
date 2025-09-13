@@ -52,14 +52,33 @@ async function run() {
 
   const urls = {
     gpActive: `${CEL_BASE}/NORAD/elements/gp.php?GROUP=active&FORMAT=json`,
+    gpActiveTle: `${CEL_BASE}/NORAD/elements/gp.php?GROUP=active&FORMAT=tle`,
     // SATCAT JSON can be finicky; CSV endpoint is reliable
     satcatOnOrbitPayloadsCsv: `${CEL_BASE}/satcat/records.php?ONORBIT=1&PAYLOADS=1&FORMAT=CSV`,
     supgpSpacex: `${CEL_BASE}/NORAD/supplemental/sup-gp.php?SOURCE=SpaceX-E&FORMAT=json`,
   } as const;
 
   console.log('Fetching CelesTrak datasets...');
-  const [gpActive, satcatCsv, supgp] = await Promise.all([
+  const [gpActive, gpActiveTle, satcatCsv, supgp] = await Promise.all([
     fetchJsonWithRetry(urls.gpActive, 2, 1000),
+    (async () => {
+      // fetch TLE as text
+      const url = urls.gpActiveTle;
+      for (let i = 0; i < 3; i++) {
+        try {
+          const res = await fetch(url, { headers: { 'User-Agent': 'crisis-watcher-satellite/0.1' }});
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return await res.text();
+        } catch (e) {
+          if (i === 2) {
+            console.warn(`fetch error (${url}):`, (e as Error).message);
+            return null;
+          }
+          await sleep(1000 * (i + 1));
+        }
+      }
+      return null;
+    })(),
     (async () => {
       // fetch CSV as text with basic retry
       const url = urls.satcatOnOrbitPayloadsCsv;
@@ -83,9 +102,11 @@ async function run() {
 
   // Persist raw datasets under the hour directory
   const gpPath = path.join(dir, 'gp_active.json');
+  const gpTlePath = path.join(dir, 'gp_active.tle');
   const satcatPath = path.join(dir, 'satcat_onorbit_payloads.csv');
   const supgpPath = path.join(dir, 'supgp_spacex.json');
   if (gpActive) await writeJsonFile(gpPath, gpActive);
+  if (gpActiveTle) await fs.writeFile(gpTlePath, gpActiveTle, 'utf-8');
   if (satcatCsv) await fs.writeFile(satcatPath, satcatCsv, 'utf-8');
   if (supgp) await writeJsonFile(supgpPath, supgp);
 
@@ -97,11 +118,13 @@ async function run() {
     sources: urls,
     counts: {
       gpActive: Array.isArray(gpActive) ? gpActive.length : 0,
+      gpActiveTleLines: typeof gpActiveTle === 'string' ? Math.max(0, gpActiveTle.split(/\r?\n/).filter(Boolean).length) : 0,
       satcatOnOrbitPayloads: typeof satcatCsv === 'string' ? Math.max(0, satcatCsv.split(/\r?\n/).filter(Boolean).length - 1) : 0,
       supgpSpacex: Array.isArray(supgp) ? supgp.length : 0,
     },
     files: {
       gpActive: 'gp_active.json',
+      gpActiveTle: 'gp_active.tle',
       satcatOnOrbitPayloads: 'satcat_onorbit_payloads.csv',
       supgpSpacex: 'supgp_spacex.json',
     },
@@ -113,6 +136,7 @@ async function run() {
   await fs.mkdir(latestDir, { recursive: true });
   await writeJsonFile(path.join(latestDir, 'index.json'), meta);
   if (gpActive) await writeJsonFile(path.join(latestDir, 'gp_active.json'), gpActive);
+  if (gpActiveTle) await fs.writeFile(path.join(latestDir, 'gp_active.tle'), gpActiveTle, 'utf-8');
   if (satcatCsv) await fs.writeFile(path.join(latestDir, 'satcat_onorbit_payloads.csv'), satcatCsv, 'utf-8');
   if (supgp) await writeJsonFile(path.join(latestDir, 'supgp_spacex.json'), supgp);
   console.log(`updated latest: ${latestDir}`);

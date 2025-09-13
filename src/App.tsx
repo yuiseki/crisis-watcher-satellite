@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { MapLibreGlobe } from './components/MapLibreGlobe'
 
 type SatIndex = {
   generatedAt: string
@@ -71,6 +72,42 @@ export default function App() {
           </a>
         </li>
       </ul>
+
+      {/* Globe visualization using a subset of OMM objects */}
+      <section style={{ marginTop: 16 }}>
+        <h2>Globe</h2>
+        <LoadTleAndRender />
+      </section>
     </div>
   )
+}
+
+const LoadTleAndRender: React.FC = () => {
+  const [tles, setTles] = useState<Array<{ name?: string; l1: string; l2: string }> | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const res = await fetch('data/latest/gp_active.tle')
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const text = await res.text()
+        const lines = text.split(/\r?\n/)
+        const out: Array<{ name?: string; l1: string; l2: string }> = []
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim()
+          if (line.startsWith('1 ') && i + 1 < lines.length && lines[i + 1].startsWith('2 ')) {
+            const name = i > 0 && !lines[i - 1].startsWith('1 ') && !lines[i - 1].startsWith('2 ') ? lines[i - 1].trim() : undefined
+            out.push({ name, l1: line, l2: lines[i + 1].trim() })
+            i++
+          }
+        }
+        setTles(out)
+      } catch (e: any) {
+        setErr(e?.message ?? String(e))
+      }
+    })()
+  }, [])
+  if (err) return <div>Error loading TLE: {err}</div>
+  if (!tles) return <div>Loading TLE…</div>
+  return <MapLibreGlobe tles={tles} />
 }
