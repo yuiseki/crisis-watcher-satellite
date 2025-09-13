@@ -33,9 +33,9 @@
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "@deck.gl/core": "^9.0.36",
-    "@deck.gl/layers": "^9.0.36",
-    "@deck.gl/mapbox": "^9.0.36",
+    "@deck.gl/core": "^9.1.0",
+    "@deck.gl/layers": "^9.1.0",
+    "@deck.gl/mapbox": "^9.1.0",
     "maplibre-gl": "^5.7.0",
     "satellite.js": "^5.0.0"
   }
