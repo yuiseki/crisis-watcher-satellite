@@ -17,16 +17,33 @@ const STYLE_RASTER_GLOBE: any = {
 }
 
 function pickColorByType(objectType: string, name: string, altKm: number): [number, number, number, number] {
+  // Category-first coloring: NAV=red, GEO=yellow, OTHER=orange
+  const cat = pickCategory(objectType, name, altKm)
+  switch (cat) {
+    case 'NAV':
+      return [255, 80, 80, 255] // red
+    case 'GEO':
+      return [255, 220, 0, 255] // yellow
+    case 'OTHER':
+      return [255, 150, 50, 255] // orange
+    case 'PAYLOAD':
+    case 'ROCKET':
+    case 'DEBRIS':
+    default:
+      return [255, 150, 50, 255] // treat as orange by default
+  }
+}
+
+function pickCategory(objectType: string, name: string, altKm: number): 'NAV' | 'GEO' | 'PAYLOAD' | 'ROCKET' | 'DEBRIS' | 'OTHER' {
   const t = (objectType || '').toUpperCase()
   const isNav = /(GPS|NAVSTAR|GLONASS|GALILEO|BEIDOU|BDS|IRNSS|QZSS)/i.test(name)
   const isGEO = altKm > 30000
-  // Warm palette (yellow/orange/red)
-  if (isNav) return [255, 196, 61, 255]      // golden yellow
-  if (isGEO) return [255, 174, 66, 255]      // warm amber
-  if (t.includes('PAYLOAD')) return [255, 209, 102, 255] // soft yellow
-  if (t.includes('ROCKET')) return [255, 99, 44, 255]    // orange-red
-  if (t.includes('DEBRIS')) return [214, 69, 65, 255]    // deep red
-  return [255, 151, 51, 255]                 // orange
+  if (isNav) return 'NAV'
+  if (isGEO) return 'GEO'
+  if (t.includes('PAYLOAD')) return 'PAYLOAD'
+  if (t.includes('ROCKET')) return 'ROCKET'
+  if (t.includes('DEBRIS')) return 'DEBRIS'
+  return 'OTHER'
 }
 
 export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<number, string> }> = ({ tles, typesBySatnum = {} }) => {
@@ -101,6 +118,7 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
     if (!ready || !overlayRef.current) return
     let alive = true
     let pathTick = 0
+    let summaryTick = 0
     // Logarithmic altitude scaling to “stick” satellites to just outside the atmosphere
     const ATMOSPHERE_TOP_M = 200_000 // raise minimum altitude slightly (~200 km)
     const SHELL_THICKNESS_M = 80_000 // visual shell thickness outside atmosphere
@@ -114,6 +132,10 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
     const tick = () => {
       const now = new Date()
       const gmst = gstime(now)
+      const counts = { NAV: 0, GEO: 0, PAYLOAD: 0, ROCKET: 0, DEBRIS: 0, OTHER: 0 }
+      const rawTypeCounts: Record<string, number> = {}
+      const otherTypeCounts: Record<string, number> = {}
+      let otherEmptyType = 0
       const data = satrecs.map((s) => {
         const pv = propagate(s.rec, now)
         const pos = pv?.position
@@ -124,6 +146,14 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
         const altM = Math.max(0, (gd.height ?? 0) * 1000)
         const altScaledM = scaleAltitudeLog(altM)
         const typ = (s.satnum && typesBySatnum[s.satnum]) || ''
+        const normTyp = (typ || '').toString().trim().toUpperCase()
+        if (normTyp) rawTypeCounts[normTyp] = (rawTypeCounts[normTyp] || 0) + 1
+        const cat = pickCategory(normTyp, s.id, gd.height ?? 0)
+        counts[cat]++
+        if (cat === 'OTHER') {
+          if (normTyp) otherTypeCounts[normTyp] = (otherTypeCounts[normTyp] || 0) + 1
+          else otherEmptyType++
+        }
         const color = pickColorByType(typ, s.id, gd.height ?? 0)
         return { position: [lon, lat, altScaledM], color }
       }).filter(Boolean) as Array<{ position: [number, number, number]; color: [number, number, number, number] }>
@@ -135,6 +165,26 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
       console.debug(`[MapLibreGlobe] sats=`, data.length, `sample=`, data[0]?.position)
     }
   } catch {}
+
+      // Category summary every 5 ticks + OTHER breakdown (top 6)
+      try {
+        summaryTick++
+        if (summaryTick % 5 === 0) {
+          const total = Object.values(counts).reduce((a, b) => a + (b as number), 0)
+          const parts = Object.entries(counts)
+            .filter(([, v]) => (v as number) > 0)
+            .map(([k, v]) => `${k}:${v}`)
+            .join(' ')
+          const topOther = Object.entries(otherTypeCounts)
+            .sort((a, b) => (b[1] as number) - (a[1] as number))
+            .slice(0, 6)
+            .map(([k, v]) => `${k}:${v}`)
+            .join(' ')
+          const otherSuffix = topOther || otherEmptyType ? ` | OTHER breakdown: ${topOther}${otherEmptyType ? ` EMPTY:${otherEmptyType}` : ''}` : ''
+          // eslint-disable-next-line no-console
+          console.debug(`[MapLibreGlobe] categories: ${parts} total:${total}${otherSuffix}`)
+        }
+      } catch {}
 
       // Globe-friendly sphere impostor via IconLayer (billboard with shaded atlas)
       const iconMapping = {
