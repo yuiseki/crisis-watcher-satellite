@@ -1,0 +1,38 @@
+name: Publish GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_run:
+    workflows:
+      - Six-hour Satellite Data
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  publish_github_pages:
+    if: github.event_name == 'workflow_run' || (github.event_name == 'push' && github.actor != 'github-actions[bot]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+      - name: Use Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.x
+          cache: npm
+      - name: Build page
+        run: |
+          npm i
+          npm run build
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+
