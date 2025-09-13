@@ -1,11 +1,40 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import maplibregl, { Map as MlMap, GeoJSONSource } from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
+import 'maplibre-gl/dist/maplibre-gl.css'
 import type { FeatureCollection, Feature, Point } from 'geojson'
 import { twoline2satrec, propagate, eciToGeodetic, degreesLat, degreesLong, gstime } from 'satellite.js'
 
 type Tle = { name?: string; l1: string; l2: string }
 
-const STYLE = 'https://demotiles.maplibre.org/style.json'
+const STYLE_RASTER_GLOBE: any = {
+  version: 8,
+  projection: { type: 'globe' },
+  sources: {
+    satellite: {
+      type: 'raster',
+      tiles: [
+        'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg'
+      ],
+      tileSize: 256,
+      attribution: 'Imagery © EOX | s2cloudless-2020'
+    }
+  },
+  layers: [
+    { id: 'satellite', type: 'raster', source: 'satellite' }
+  ],
+  sky: {
+    'atmosphere-blend': [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      0, 1,
+      5, 1,
+      7, 0
+    ]
+  },
+  light: { anchor: 'map', position: [1.5, 90, 80] }
+}
 
 const buildGeoJson = (coords: Array<{ lon: number; lat: number; h?: number; id: string }>): FeatureCollection => ({
   type: 'FeatureCollection',
@@ -38,30 +67,14 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[] }> = ({ tles }) => {
     if (!divRef.current) return
     const map = new maplibregl.Map({
       container: divRef.current,
-      style: STYLE,
+      style: STYLE_RASTER_GLOBE,
       center: [140, 35],
       zoom: 1.2,
       pitch: 0,
       bearing: 0,
     })
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
-    // Ensure globe projection after style is ready
-    const applyGlobe = () => {
-      try {
-        // MapLibre 5+: set projection name as string
-        // @ts-expect-error types may lag behind in some setups
-        map.setProjection('globe')
-        // @ts-expect-error fog API exists in MapLibre 5+
-        map.setFog({})
-      } catch (e) {
-        // ignore if not supported
-      }
-    }
-    map.on('style.load', () => {
-      applyGlobe()
-    })
     map.on('load', () => {
-      applyGlobe()
       setReady(true)
     })
     mapRef.current = map
