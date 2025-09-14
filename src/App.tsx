@@ -49,6 +49,10 @@ export default function App() {
       <p>
         生成: <code>{data.generatedAt}</code> / 時間帯: <code>{data.hourPath}</code>
       </p>
+      {/* Globe visualization using a subset of OMM objects */}
+      <section style={{ marginTop: 16 }}>
+        <LoadTleAndRender />
+      </section>
       <ul>
         <li>gp_active 件数: <b>{data.counts.gpActive}</b></li>
         <li>satcat_onorbit_payloads 行数: <b>{data.counts.satcatOnOrbitPayloads}</b></li>
@@ -73,11 +77,6 @@ export default function App() {
         </li>
       </ul>
 
-      {/* Globe visualization using a subset of OMM objects */}
-      <section style={{ marginTop: 16 }}>
-        <h2>Globe</h2>
-        <LoadTleAndRender />
-      </section>
     </div>
   )
 }
