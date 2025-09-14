@@ -110,18 +110,34 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
     if (!ready || !overlayRef.current) return
     let alive = true
     let summaryTick = 0
-    // Logarithmic altitude scaling tuned for better visual separation
-    // - Increase shell thickness so LEO/MEO/GEO are more distinguishable
-    // - Apply gamma (<1) to emphasize low-altitude differences
-    const ATMOSPHERE_TOP_M = 120_000        // ~120 km
-    const SHELL_THICKNESS_M = 600_000       // ~600 km visual shell
-    const MAX_ALT_M = 120_000_000            // clamp ~120,000 km
-    const GAMMA = 0.7                       // gentler spread for low values
+    // Piecewise altitude scaling: place LEO/MEO/GEO at controllable shell fractions
+    const ATMOSPHERE_TOP_M = 120_000        // ~120 km from surface
+    const SHELL_THICKNESS_M = 300_000       // ~300 km visual shell
+    // Physical anchors (m)
+    const LEO_MAX_M = 2_000_000             // ~2,000 km
+    const MEO_MAX_M = 20_200_000            // ~20,200 km (GNSS)
+    const GEO_ALT_M = 35_786_000            // ~35,786 km (GEO)
+    // Visual anchors (fraction of shell)
+    const LEO_FRAC = 0.25                   // 0..25% of shell for LEO
+    const MEO_FRAC = 0.60                   // up to 60% for MEO
+    // Per-band gamma: <1 expands, >1 compresses
+    const GAMMA_LEO = 0.7
+    const GAMMA_MEO = 0.9
+    const GAMMA_GEO = 1.2
     const scaleAltitudeLog = (altM: number) => {
-      const a = Math.max(0, Math.min(altM, MAX_ALT_M))
-      const t = Math.log1p(a) / Math.log1p(MAX_ALT_M)
-      const te = Math.pow(t, GAMMA)
-      return ATMOSPHERE_TOP_M + te * SHELL_THICKNESS_M
+      const a = Math.max(0, Math.min(altM, GEO_ALT_M))
+      let f = 0
+      if (a <= LEO_MAX_M) {
+        const t = a / LEO_MAX_M
+        f = Math.pow(t, GAMMA_LEO) * LEO_FRAC
+      } else if (a <= MEO_MAX_M) {
+        const t = (a - LEO_MAX_M) / (MEO_MAX_M - LEO_MAX_M)
+        f = LEO_FRAC + Math.pow(t, GAMMA_MEO) * (MEO_FRAC - LEO_FRAC)
+      } else {
+        const t = (a - MEO_MAX_M) / (GEO_ALT_M - MEO_MAX_M)
+        f = MEO_FRAC + Math.pow(t, GAMMA_GEO) * (1 - MEO_FRAC)
+      }
+      return ATMOSPHERE_TOP_M + f * SHELL_THICKNESS_M
     }
     const tick = () => {
       const now = new Date()
