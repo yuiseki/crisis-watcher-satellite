@@ -12,8 +12,30 @@ type Tle = { name?: string; l1: string; l2: string }
 const STYLE_RASTER_GLOBE: any = {
   version: 8,
   projection: { type: 'globe' },
-  sources: { osm: { type: 'raster', tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256 } },
-  layers: [{ id: 'base', type: 'raster', source: 'osm' }]
+  sources: {
+    satellite: {
+      type: 'raster',
+      tiles: ['https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg'],
+      tileSize: 256
+    }
+  },
+  layers: [
+    { id: 'Satellite', type: 'raster', source: 'satellite' }
+  ],
+  sky: {
+    'atmosphere-blend': [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      0, 1,
+      5, 1,
+      7, 0
+    ]
+  },
+  light: {
+    anchor: 'map',
+    position: [1.5, 90, 80]
+  }
 }
 
 function pickColorByType(objectType: string, name: string, altKm: number): [number, number, number, number] {
