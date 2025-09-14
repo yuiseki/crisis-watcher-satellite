@@ -21,6 +21,7 @@
   "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
+    "@types/maplibre-gl": "^1.13.2",
     "@types/node": "^22.5.4",
     "@types/react": "^19.1.9",
     "@types/react-dom": "^19.1.5",
@@ -31,12 +32,15 @@
     "vite": "^5.4.8"
   },
   "dependencies": {
+    "@deck.gl/core": "^9.1.14",
+    "@deck.gl/layers": "^9.1.14",
+    "@deck.gl/mapbox": "^9.1.14",
+    "@deck.gl/mesh-layers": "^9.1.14",
+    "@luma.gl/engine": "^9.1.9",
+    "maplibre-gl": "^5.7.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "@deck.gl/core": "^9.1.0",
-    "@deck.gl/layers": "^9.1.0",
-    "@deck.gl/mapbox": "^9.1.0",
-    "maplibre-gl": "^5.7.0",
+    "react-map-gl": "^8.0.4",
     "satellite.js": "^5.0.0"
   }
 }
