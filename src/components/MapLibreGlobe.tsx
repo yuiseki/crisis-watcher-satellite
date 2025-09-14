@@ -76,7 +76,7 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
   const [ready, setReady] = useState(false)
 
   // Unit sphere; scaled per-instance for a small visual size in meters
-  const sphere = useMemo(() => new SphereGeometry({ radius: 5, nlat: 12, nlong: 24 }), [])
+  const sphere = useMemo(() => new SphereGeometry({ radius: 2.5, nlat: 12, nlong: 24 }), [])
 
   const satrecs = useMemo(() => {
     return tles.slice(0, 300).map((t) => {
@@ -110,14 +110,18 @@ export const MapLibreGlobe: React.FC<{ tles: Tle[]; typesBySatnum?: Record<numbe
     if (!ready || !overlayRef.current) return
     let alive = true
     let summaryTick = 0
-    // Logarithmic altitude scaling to keep satellites near a thin shell above atmosphere
-    const ATMOSPHERE_TOP_M = 200_000        // ~200 km
-    const SHELL_THICKNESS_M = 80_000        // visual shell thickness
-    const MAX_ALT_M = 100_000_000           // clamp ~100,000 km
+    // Logarithmic altitude scaling tuned for better visual separation
+    // - Increase shell thickness so LEO/MEO/GEO are more distinguishable
+    // - Apply gamma (<1) to emphasize low-altitude differences
+    const ATMOSPHERE_TOP_M = 120_000        // ~120 km
+    const SHELL_THICKNESS_M = 600_000       // ~600 km visual shell
+    const MAX_ALT_M = 120_000_000            // clamp ~120,000 km
+    const GAMMA = 0.7                       // gentler spread for low values
     const scaleAltitudeLog = (altM: number) => {
       const a = Math.max(0, Math.min(altM, MAX_ALT_M))
       const t = Math.log1p(a) / Math.log1p(MAX_ALT_M)
-      return ATMOSPHERE_TOP_M + t * SHELL_THICKNESS_M
+      const te = Math.pow(t, GAMMA)
+      return ATMOSPHERE_TOP_M + te * SHELL_THICKNESS_M
     }
     const tick = () => {
       const now = new Date()
