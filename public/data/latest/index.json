@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2025-09-22T18:20:21.831Z",
+  "generatedAt": "2025-09-23T00:35:26.224Z",
   "timeZone": "Asia/Tokyo",
-  "hourPath": "2025/09/23/03",
+  "hourPath": "2025/09/23/09",
   "sources": {
     "gpActive": "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json",
     "gpActiveTle": "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle",
