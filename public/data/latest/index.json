@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2025-09-24T18:20:24.366Z",
+  "generatedAt": "2025-09-25T00:36:21.362Z",
   "timeZone": "Asia/Tokyo",
-  "hourPath": "2025/09/25/03",
+  "hourPath": "2025/09/25/09",
   "sources": {
     "gpActive": "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json",
     "gpActiveTle": "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle",
@@ -9,8 +9,8 @@
     "supgpSpacex": "https://celestrak.org/NORAD/supplemental/sup-gp.php?SOURCE=SpaceX-E&FORMAT=json"
   },
   "counts": {
-    "gpActive": 12747,
-    "gpActiveTleLines": 38241,
+    "gpActive": 12744,
+    "gpActiveTleLines": 38232,
     "satcatOnOrbitPayloads": 0,
     "supgpSpacex": 0
   },
