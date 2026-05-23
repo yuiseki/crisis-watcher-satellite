@@ -134,7 +134,8 @@ export const MapLibreGlobe: React.FC<{
       map.addControl(overlay);
       overlayRef.current = overlay;
       try {
-        overlayRef.current?.setProps({ clearCanvas: false });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        overlayRef.current?.setProps({ clearCanvas: false } as any);
       } catch {}
       setReady(true);
     });
@@ -196,7 +197,7 @@ export const MapLibreGlobe: React.FC<{
         .map((s) => {
           const pv = propagate(s.rec, now);
           const pos = pv?.position;
-          if (!pos) return null;
+          if (!pos || typeof pos === "boolean") return null;
           const gd = eciToGeodetic(pos, gmst);
           const lat = degreesLat(gd.latitude);
           const lon = degreesLong(gd.longitude);
@@ -279,7 +280,8 @@ export const MapLibreGlobe: React.FC<{
           material: { ambient: 0.2, diffuse: 0.8, shininess: 32 },
         }),
       ];
-      overlayRef.current?.setProps({ layers, clearCanvas: false });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      overlayRef.current?.setProps({ layers, clearCanvas: false } as any);
     };
     tick();
     const t = setInterval(() => alive && tick(), 1000);
